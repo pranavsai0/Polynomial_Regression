@@ -24,3 +24,8 @@ For Ridge and Lasso, the following regularisation strengths are tested:
 
 ```text
 alpha = 0.01, 0.1, 1, 10
+```
+
+## Model Selection
+
+Mean cross-validation Mean Squared Error (MSE) values are compared across all combinations of polynomial degrees, regression methods, and alpha values to select the best-performing model for each dataset.
