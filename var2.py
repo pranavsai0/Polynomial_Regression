@@ -1,12 +1,11 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.linear_model import LinearRegression
+
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
 from sklearn.pipeline import make_pipeline
 from sklearn.model_selection import KFold, cross_validate
 
-
-# Load the training and test datasets
 train_data = pd.read_csv("BT2024099_train_var2.csv")
 test_data = pd.read_csv("BT2024099_test_var2.csv")
 
@@ -14,26 +13,27 @@ X_train = train_data.drop("y", axis=1)
 y_train = train_data["y"]
 X_test = test_data[X_train.columns]
 
-# Use 5-fold cross-validation to choose the polynomial degree
 kf = KFold(n_splits=5, shuffle=True, random_state=42)
 
-best_degree = 1
+alphas = [0.01, 0.1, 1, 10]
+
 best_mse = float("inf")
+best_model_name = None
+best_degree = None
+best_alpha = None
 best_r2 = None
 
-degrees = []
-mse_values = []
-r2_values = []
+linear_mse = []
+ridge_mse = []
+lasso_mse = []
 
-print("Testing polynomial degrees...\n")
+print("Testing models for var2...\n")
 
+# Polynomial + Linear Regression
 for degree in range(1, 21):
 
     model = make_pipeline(
-        PolynomialFeatures(
-            degree=degree,
-            include_bias=False
-        ),
+        PolynomialFeatures(degree=degree, include_bias=False),
         LinearRegression()
     )
 
@@ -42,97 +42,178 @@ for degree in range(1, 21):
         X_train,
         y_train,
         cv=kf,
-        scoring={
-            "mse": "neg_mean_squared_error",
-            "r2": "r2"
-        }
+        scoring={"mse": "neg_mean_squared_error", "r2": "r2"},
+        n_jobs=-1
     )
 
     mse = -scores["test_mse"].mean()
     r2 = scores["test_r2"].mean()
 
-    degrees.append(degree)
-    mse_values.append(mse)
-    r2_values.append(r2)
+    linear_mse.append(mse)
 
-    print(
-        f"Degree {degree}: "
-        f"CV MSE = {mse:.6f}, "
-        f"CV R2 = {r2:.6f}"
-    )
+    print(f"Linear | Degree {degree}: "
+          f"MSE = {mse:.6f}, R2 = {r2:.6f}")
 
-    # Select the degree with the lowest validation MSE
     if mse < best_mse:
         best_mse = mse
+        best_model_name = "Linear"
         best_degree = degree
+        best_alpha = None
         best_r2 = r2
 
-print("\nSelected model for var2")
-print("Best degree:", best_degree)
-print(f"Best CV MSE: {best_mse:.6f}")
-print(f"Best CV R2 : {best_r2:.6f}")
 
-# Plot CV MSE and CV R2 against polynomial degree
-fig, ax1 = plt.subplots(figsize=(8, 5))
+# Polynomial + Ridge
+for degree in range(1, 21):
 
-ax1.plot(
-    degrees,
-    mse_values,
-    marker="o",
-    label="CV MSE"
-)
-ax1.set_xlabel("Polynomial Degree")
-ax1.set_ylabel("CV MSE")
-ax1.set_xticks(degrees)
-ax1.grid(True)
+    degree_best_mse = float("inf")
 
-ax2 = ax1.twinx()
+    for alpha in alphas:
 
-ax2.plot(
-    degrees,
-    r2_values,
-    marker="o",
-    linestyle="--",
-    label="CV R2"
-)
-ax2.set_ylabel("CV R2")
+        model = make_pipeline(
+            PolynomialFeatures(degree=degree, include_bias=False),
+            StandardScaler(),
+            Ridge(alpha=alpha)
+        )
 
-ax1.scatter(
+        scores = cross_validate(
+            model,
+            X_train,
+            y_train,
+            cv=kf,
+            scoring={"mse": "neg_mean_squared_error", "r2": "r2"},
+            n_jobs=-1
+        )
+
+        mse = -scores["test_mse"].mean()
+        r2 = scores["test_r2"].mean()
+
+        print(f"Ridge  | Degree {degree}, Alpha {alpha}: "
+              f"MSE = {mse:.6f}, R2 = {r2:.6f}")
+
+        if mse < degree_best_mse:
+            degree_best_mse = mse
+
+        if mse < best_mse:
+            best_mse = mse
+            best_model_name = "Ridge"
+            best_degree = degree
+            best_alpha = alpha
+            best_r2 = r2
+
+    ridge_mse.append(degree_best_mse)
+
+
+# Polynomial + Lasso
+for degree in range(1, 21):
+
+    degree_best_mse = float("inf")
+
+    for alpha in alphas:
+
+        model = make_pipeline(
+            PolynomialFeatures(degree=degree, include_bias=False),
+            StandardScaler(),
+            Lasso(alpha=alpha, max_iter=20000, tol=1e-3)
+        )
+
+        scores = cross_validate(
+            model,
+            X_train,
+            y_train,
+            cv=kf,
+            scoring={"mse": "neg_mean_squared_error", "r2": "r2"},
+            n_jobs=-1
+        )
+
+        mse = -scores["test_mse"].mean()
+        r2 = scores["test_r2"].mean()
+
+        print(f"Lasso  | Degree {degree}, Alpha {alpha}: "
+              f"MSE = {mse:.6f}, R2 = {r2:.6f}")
+
+        if mse < degree_best_mse:
+            degree_best_mse = mse
+
+        if mse < best_mse:
+            best_mse = mse
+            best_model_name = "Lasso"
+            best_degree = degree
+            best_alpha = alpha
+            best_r2 = r2
+
+    lasso_mse.append(degree_best_mse)
+
+
+print("\nBest model for var2")
+print("Model:", best_model_name)
+print("Degree:", best_degree)
+print("Alpha:", best_alpha)
+print(f"CV MSE: {best_mse:.6f}")
+print(f"CV R2 : {best_r2:.6f}")
+
+
+# Comparison graph
+degrees = list(range(1, 21))
+
+plt.figure(figsize=(10, 5))
+
+plt.plot(degrees, linear_mse, marker="o", label="Linear")
+plt.plot(degrees, ridge_mse, marker="o", label="Ridge")
+plt.plot(degrees, lasso_mse, marker="o", label="Lasso")
+
+plt.scatter(
     best_degree,
     best_mse,
-    s=100,
-    label=f"Best degree = {best_degree}"
+    s=120,
+    label=f"Best: {best_model_name}, Degree {best_degree}"
 )
 
-ax2.scatter(
-    best_degree,
-    best_r2,
-    s=100
-)
+plt.xlabel("Polynomial Degree")
+plt.ylabel("Cross-Validation MSE (log scale)")
+plt.title("var2: Comparison of Linear, Ridge and Lasso")
+plt.xticks(degrees)
+plt.yscale("log")
+plt.grid(True, which="both")
+plt.legend()
 
-plt.title("var2: CV MSE and CV R2 vs Polynomial Degree")
-fig.tight_layout()
+plt.tight_layout()
+plt.savefig("var2_method_comparison.png", dpi=300)
 plt.show()
 
-# Refit the selected model using all training data
-final_model = make_pipeline(
-    PolynomialFeatures(
-        degree=best_degree,
-        include_bias=False
-    ),
-    LinearRegression()
-)
+
+# Train final model
+if best_model_name == "Linear":
+
+    final_model = make_pipeline(
+        PolynomialFeatures(degree=best_degree, include_bias=False),
+        LinearRegression()
+    )
+
+elif best_model_name == "Ridge":
+
+    final_model = make_pipeline(
+        PolynomialFeatures(degree=best_degree, include_bias=False),
+        StandardScaler(),
+        Ridge(alpha=best_alpha)
+    )
+
+else:
+
+    final_model = make_pipeline(
+        PolynomialFeatures(degree=best_degree, include_bias=False),
+        StandardScaler(),
+        Lasso(alpha=best_alpha, max_iter=20000, tol=1e-3)
+    )
+
 
 final_model.fit(X_train, y_train)
 
-# Generate predictions for the test dataset
 predictions = final_model.predict(X_test)
 
-# Submission file should contain only the predicted y values
 pd.DataFrame({"y": predictions}).to_csv(
     "BT2024099_pred_var2.csv",
     index=False
 )
 
-print("\nPredictions saved to:")
+print("\nPrediction file saved:")
 print("BT2024099_pred_var2.csv")
